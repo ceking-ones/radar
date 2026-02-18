@@ -29,7 +29,7 @@ if 'quota_used' not in st.session_state:
 if 'search_performed' not in st.session_state:
     st.session_state['search_performed'] = False
 
-# --- KAMUS GENRE SUPER LENGKAP (ULTIMATE VERSION v7) ---
+# --- KAMUS GENRE SUPER LENGKAP (V7) ---
 GENRE_DB = {
     "reggae": [
         "dub", "roots", "dancehall", "ska", "rocksteady", "raggamuffin", 
@@ -101,18 +101,16 @@ with st.sidebar:
     st.divider()
     keyword = st.text_input("Genre / Keyword:", value="Rock")
     
-    # --- DAFTAR NEGARA UPDATE ---
-    # Menambahkan Italia, Spanyol, Rusia, Albania
     country_list = [
         "ID Indonesia", "BR Brazil", "US USA", "JM Jamaica",
         "GB United Kingdom", "FR France", "DE Germany", 
-        "IT Italy", "ES Spain", "RU Russia", "AL Albania", # <-- BARU
+        "IT Italy", "ES Spain", "RU Russia", "AL Albania",
         "JP Japan", "MX Mexico", "CA Canada", "AU Australia",
         "IN India", "PH Philippines", "KR South Korea"
     ]
     
     region_display = st.selectbox("Wilayah Target:", country_list, index=0)
-    region_code = region_display.split()[0] # Ambil kode 2 huruf
+    region_code = region_display.split()[0]
     
     days_filter = st.slider("Hari Terakhir:", 1, 90, 7)
     
@@ -124,7 +122,6 @@ with st.sidebar:
     
     tombol_cari = st.button("🚀 MULAI RADAR", type="primary")
     
-    # --- SAWERIA ---
     st.divider()
     st.header("☕ Support Developer")
     st.write("Bantu aplikasi ini tetap jalan & update terus!")
@@ -178,7 +175,6 @@ def fetch_youtube_data(api_key, query, region, days, cat_filter, v_type):
     if v_type == "Shorts (<1m)":
         video_duration_param = 'short'
     
-    # 1. SEARCH
     search_resp = youtube.search().list(
         q=query, part="id,snippet", maxResults=50, type="video", 
         regionCode=region, 
@@ -191,11 +187,9 @@ def fetch_youtube_data(api_key, query, region, days, cat_filter, v_type):
     video_ids = [item['id']['videoId'] for item in search_resp['items']]
     if not video_ids: return [], []
 
-    # 2. DETAILS
     video_resp = youtube.videos().list(id=','.join(video_ids), part="snippet,statistics,contentDetails").execute()
     st.session_state['quota_used'] += 1
     
-    # 3. CHANNELS
     channel_ids = [item['snippet']['channelId'] for item in video_resp['items']]
     channel_ids = list(set(channel_ids))
     
@@ -219,7 +213,6 @@ def fetch_youtube_data(api_key, query, region, days, cat_filter, v_type):
         snip = item['snippet']
         content = item['contentDetails']
         
-        # FILTER KATEGORI
         cat_id = snip.get('categoryId')
         is_music = cat_id == '10'
         is_blog = cat_id == '22'
@@ -228,7 +221,6 @@ def fetch_youtube_data(api_key, query, region, days, cat_filter, v_type):
         if cat_filter == "Hanya Blog" and not is_blog: continue
         if cat_filter == "Semua (Music + Blog)" and (cat_id not in ['10', '22']): continue
         
-        # FILTER DURASI
         duration_sec = parse_duration(content['duration'])
         if v_type == "Shorts (<1m)" and duration_sec > 60: continue
         if v_type == "Video Panjang (>1m)" and duration_sec <= 60: continue
@@ -266,17 +258,25 @@ def fetch_youtube_data(api_key, query, region, days, cat_filter, v_type):
     my_bar.empty()
     return data, tags_all
 
-# --- SMART SUB-GENRE ---
+# --- SMART SUB-GENRE (V2: REVERSE LOOKUP) ---
 def smart_subgenre_analysis(tags, main_genre):
     main_key = main_genre.lower()
+    known_subgenres = []
+    parent_name = None
     
-    if main_key not in GENRE_DB:
-        found_key = next((k for k in GENRE_DB if k in main_key), None)
-        if found_key: known_subgenres = GENRE_DB[found_key]
-        else: known_subgenres = []
-    else:
+    # 1. Direct Match (Cari Bapak)
+    if main_key in GENRE_DB:
         known_subgenres = GENRE_DB[main_key]
-
+        parent_name = main_key.title()
+        
+    # 2. Reverse Lookup (Cari Anak -> Temukan Bapak)
+    else:
+        for genre, subs in GENRE_DB.items():
+            if any(main_key in s for s in subs) or main_key in genre or genre in main_key:
+                known_subgenres = subs
+                parent_name = genre.title()
+                break
+    
     valid_subs = []
     
     if known_subgenres:
@@ -284,14 +284,16 @@ def smart_subgenre_analysis(tags, main_genre):
             clean_tag = tag.lower().strip()
             if any(sub in clean_tag for sub in known_subgenres):
                 matched_sub = next((sub for sub in known_subgenres if sub in clean_tag), clean_tag)
-                valid_subs.append(matched_sub)
+                # Filter biar gak dobel sama keyword search
+                if matched_sub not in main_key and main_key not in matched_sub:
+                    valid_subs.append(matched_sub)
     
     # FALLBACK
     if not valid_subs:
         fallback_tags = [t.lower() for t in tags if len(t) > 3 and main_key not in t.lower()]
-        return Counter(fallback_tags).most_common(8), False
+        return Counter(fallback_tags).most_common(8), False, None
     
-    return Counter(valid_subs).most_common(8), True
+    return Counter(valid_subs).most_common(8), True, parent_name
 
 # --- MAIN UI ---
 st.title("📡 CEKINGONES RADAR")
@@ -312,7 +314,7 @@ if tombol_cari and api_key:
 elif tombol_cari and not api_key:
     st.error("⚠️ Masukkan API Key dulu!")
 
-# --- RENDER ---
+# --- RENDER HASIL ---
 if st.session_state['search_performed']:
     results = st.session_state['results_cache']
     raw_tags = st.session_state['tags_cache']
@@ -320,12 +322,18 @@ if st.session_state['search_performed']:
     if not results:
         st.warning(f"Tidak ditemukan video. Coba perluas filter hari atau ganti kata kunci.")
     else:
-        smart_subs, is_strict = smart_subgenre_analysis(raw_tags, keyword)
+        smart_subs, is_strict, parent_name = smart_subgenre_analysis(raw_tags, keyword)
         
         if is_strict:
-            st.subheader(f"🧬 Sub-Genre Terdeteksi ({keyword})")
+            if parent_name and parent_name.lower() != keyword.lower():
+                st.subheader(f"🧬 Keluarga Genre: {parent_name}")
+                st.caption(f"Sistem mendeteksi '{keyword}' adalah bagian dari **{parent_name}**. Menampilkan sub-genre terkait:")
+            else:
+                st.subheader(f"🧬 Sub-Genre Terdeteksi ({keyword})")
+                st.caption("✅ Mode Kamus Aktif")
         else:
             st.subheader(f"🏷️ Top Tags Terkait (Mode Fallback)")
+            st.caption("⚠️ Mode Fallback: Menampilkan tag terbanyak dari video.")
             
         if smart_subs:
             cols = st.columns(8)
@@ -334,8 +342,14 @@ if st.session_state['search_performed']:
                     if is_strict: cols[i].info(f"#{genre_name}")
                     else: cols[i].warning(f"#{genre_name}")
         else:
-            st.caption("Tidak ada data tags yang cukup.")
+            st.caption("Tidak ada data tags yang relevan.")
         
+        with st.expander(f"📚 Intip Kamus: Apa yang dicari sistem?"):
+            if parent_name:
+                 st.write(f"Keyword '{keyword}' terhubung dengan Database '{parent_name}': {GENRE_DB.get(parent_name.lower(), [])}")
+            else:
+                 st.warning("Kata kunci ini belum ada di Kamus Database kita. Sistem berjalan manual.")
+
         st.divider()
         st.write(f"Ditemukan: **{len(results)} Video** di wilayah **{region_code}**")
 
@@ -373,4 +387,3 @@ if st.session_state['search_performed']:
                     st.link_button("▶️", vid['url'])
                 
                 st.write("---")
-
