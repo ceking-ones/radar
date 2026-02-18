@@ -101,10 +101,13 @@ with st.sidebar:
     st.divider()
     keyword = st.text_input("Genre / Keyword:", value="Rock")
     
+    # --- DAFTAR NEGARA UPDATE (TIMUR TENGAH & ASIA TENGAH) ---
     country_list = [
         "ID Indonesia", "BR Brazil", "US USA", "JM Jamaica",
         "GB United Kingdom", "FR France", "DE Germany", 
         "IT Italy", "ES Spain", "RU Russia", "AL Albania",
+        "TR Turkey", "SA Saudi Arabia", "EG Egypt", "AE Utd. Arab Emirates", # <-- TIMUR TENGAH
+        "UZ Uzbekistan", "KZ Kazakhstan", # <-- ASIA TENGAH
         "JP Japan", "MX Mexico", "CA Canada", "AU Australia",
         "IN India", "PH Philippines", "KR South Korea"
     ]
@@ -387,3 +390,4 @@ if st.session_state['search_performed']:
                     st.link_button("▶️", vid['url'])
                 
                 st.write("---")
+
